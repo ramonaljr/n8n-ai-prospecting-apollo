@@ -1,0 +1,1912 @@
+{
+  "name": "Harbourline Payroll Services - AI Prospecting with Apollo",
+  "nodes": [
+    {
+      "id": "2f58d9e1-b9c0-45a7-b564-2eb8561d9683",
+      "name": "Prospecting Request Form",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.6,
+      "position": [
+        0,
+        352
+      ],
+      "parameters": {
+        "formTitle": "Harbourline Payroll Services - New Prospecting Run",
+        "formDescription": "Sales team only. Finds new decision-makers in Apollo, researches each company's website, drafts a personalised first email, and queues them in a Google Sheet for review. Nothing is sent automatically.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Campaign name",
+              "fieldName": "campaignName",
+              "placeholder": "e.g. Cebu SMEs - Q4",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Job titles (comma-separated)",
+              "fieldType": "textarea",
+              "fieldName": "jobTitles",
+              "placeholder": "Owner, Founder, Managing Director, Head of HR, Finance Manager",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Locations (comma-separated)",
+              "fieldName": "locations",
+              "placeholder": "Philippines, Singapore"
+            },
+            {
+              "fieldLabel": "Company size (employees)",
+              "fieldType": "dropdown",
+              "fieldName": "companySize",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "1-10"
+                  },
+                  {
+                    "option": "11-50"
+                  },
+                  {
+                    "option": "51-200"
+                  },
+                  {
+                    "option": "201-500"
+                  }
+                ]
+              },
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Industry keywords (comma-separated)",
+              "fieldName": "industryKeywords",
+              "placeholder": "logistics, manufacturing, retail"
+            },
+            {
+              "fieldLabel": "What are we offering? (one sentence)",
+              "fieldName": "offer",
+              "placeholder": "Outsourced payroll and HR admin for growing SMEs",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Sender name for the email",
+              "fieldName": "senderName",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Max new prospects to enrich (uses Apollo credits)",
+              "fieldType": "number",
+              "fieldName": "maxToEnrich",
+              "placeholder": "10",
+              "requiredField": true
+            }
+          ]
+        },
+        "options": {
+          "buttonLabel": "Find prospects",
+          "path": "prospecting-run",
+          "respondWithOptions": {
+            "values": {
+              "formSubmittedText": "Running. You'll get a Slack message when prospects are ready to review."
+            }
+          },
+          "ignoreBots": true
+        }
+      }
+    },
+    {
+      "id": "c836dffb-32e6-47ae-a29c-71c4290fb76b",
+      "name": "Clean Up Request",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        224,
+        352
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "r1",
+              "name": "campaignName",
+              "value": "={{ ($json.campaignName ?? '').trim() }}",
+              "type": "string"
+            },
+            {
+              "id": "r2",
+              "name": "jobTitles",
+              "value": "={{ String($json.jobTitles ?? '').split(',').map(s => s.trim()).filter(Boolean) }}",
+              "type": "array"
+            },
+            {
+              "id": "r3",
+              "name": "locations",
+              "value": "={{ String($json.locations ?? '').split(',').map(s => s.trim()).filter(Boolean) }}",
+              "type": "array"
+            },
+            {
+              "id": "r4",
+              "name": "employeeRange",
+              "value": "={{ String($json.companySize || '11-50').replace('-', ',') }}",
+              "type": "string"
+            },
+            {
+              "id": "r5",
+              "name": "minEmployees",
+              "value": "={{ Number(String($json.companySize || '11-50').split('-')[0]) }}",
+              "type": "number"
+            },
+            {
+              "id": "r6",
+              "name": "maxEmployees",
+              "value": "={{ Number(String($json.companySize || '11-50').split('-')[1]) }}",
+              "type": "number"
+            },
+            {
+              "id": "r7",
+              "name": "industryKeywords",
+              "value": "={{ ($json.industryKeywords ?? '').trim() }}",
+              "type": "string"
+            },
+            {
+              "id": "r8",
+              "name": "offer",
+              "value": "={{ ($json.offer ?? '').trim() }}",
+              "type": "string"
+            },
+            {
+              "id": "r9",
+              "name": "senderName",
+              "value": "={{ ($json.senderName ?? '').trim() }}",
+              "type": "string"
+            },
+            {
+              "id": "r10",
+              "name": "maxToEnrich",
+              "value": "={{ Math.min(Math.max(Number($json.maxToEnrich) || 10, 1), 50) }}",
+              "type": "number"
+            },
+            {
+              "id": "r11",
+              "name": "startedAt",
+              "value": "={{ $now.toUTC().toISO() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "a1bdb917-fc7d-4371-919c-d40fbd47be56",
+      "name": "Apollo - Search People",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "position": [
+        448,
+        352
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.apollo.io/api/v1/mixed_people/api_search",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify(Object.assign({ person_titles: $json.jobTitles, organization_num_employees_ranges: [$json.employeeRange], contact_email_status: ['verified'], per_page: 100, page: 1 }, $json.locations.length ? { person_locations: $json.locations } : {}, $json.industryKeywords ? { q_keywords: $json.industryKeywords } : {})) }}",
+        "options": {
+          "timeout": 30000
+        }
+      }
+    },
+    {
+      "id": "720e0de3-b5d9-4f65-ada7-7359651a296f",
+      "name": "Load Known Prospects",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "position": [
+        672,
+        352
+      ],
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "cachedResultName": "Prospecting"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Prospects"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "4b2e9989-a55c-4c6d-b5ae-2a1afc3aac25",
+      "name": "Shortlist New Prospects",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        352
+      ],
+      "parameters": {
+        "jsCode": "const req = $('Clean Up Request').first().json;\nconst resp = $('Apollo - Search People').first().json || {};\nconst people = resp.people || [];\n\n// Everyone already in the Google Sheet is skipped - whatever their status\n// (approved, rejected, do_not_contact...). Nobody is enriched or emailed twice.\nconst known = new Set();\nfor (const r of $('Load Known Prospects').all()) {\n  const id = (r.json || {}).apolloId;\n  if (id) known.add(String(id));\n}\n\n// Free pre-score on title only, so Apollo credits go to the best people first.\nfunction preScore(title) {\n  const t = String(title || '').toLowerCase();\n  if (/(owner|founder|ceo|managing director|president|chief)/.test(t)) return 3;\n  if (/(director|head of|vp|vice president)/.test(t)) return 2;\n  if (/manager/.test(t)) return 1;\n  return 0;\n}\n\nconst fresh = people.filter(p => p && p.id && !known.has(String(p.id)));\nfresh.sort((x, y) => preScore(y.title) - preScore(x.title));\nconst pick = fresh.slice(0, req.maxToEnrich);\n\nconst stats = { found: Number(resp.total_entries || people.length), returned: people.length, alreadyKnown: people.length - fresh.length };\n\nif (!pick.length) {\n  return [{ json: Object.assign({ ids: [] }, stats) }];\n}\n\n// Bulk enrichment takes up to 10 people per call.\nconst out = [];\nfor (let i = 0; i < pick.length; i += 10) {\n  out.push({ json: Object.assign({ ids: pick.slice(i, i + 10).map(p => p.id) }, stats) });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "718c54cc-8d49-4cfe-aa84-0576ab15b3b4",
+      "name": "Anything To Enrich?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1120,
+        352
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ ($json.ids || []).length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "f227e0fc-cbb0-43f8-b035-1fb853433590",
+      "name": "Apollo - Enrich Contacts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "position": [
+        1520,
+        336
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.apollo.io/api/v1/people/bulk_match",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ details: $json.ids.map(id => ({ id })), reveal_personal_emails: false, reveal_phone_number: false }) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 1500
+            }
+          },
+          "timeout": 30000
+        }
+      }
+    },
+    {
+      "id": "64d7cd19-e8b4-454e-a665-a3062817ee3c",
+      "name": "Slack - No New Prospects",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "onError": "continueRegularOutput",
+      "position": [
+        1520,
+        560
+      ],
+      "parameters": {
+        "authentication": "oAuth2",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_SLACK_CHANNEL_ID"
+        },
+        "text": "=:mag: *Prospecting run: no new prospects* - {{ $('Clean Up Request').first().json.campaignName }}\nApollo found {{ $json.found }} matches; {{ $json.alreadyKnown }} of the {{ $json.returned }} returned are already in the sheet.\nTry wider job titles, more locations or a different company size.",
+        "otherOptions": {}
+      }
+    },
+    {
+      "id": "2a45733e-88cf-41cc-b0f5-b7df663336a4",
+      "name": "Flatten & Score Leads",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1888,
+        336
+      ],
+      "parameters": {
+        "jsCode": "const req = $('Clean Up Request').first().json;\nconst titlesWanted = req.jobTitles.map(s => s.toLowerCase());\nconst industryWanted = String(req.industryKeywords || '').toLowerCase().split(',').map(s => s.trim()).filter(Boolean);\nconst out = [];\n\nfor (const item of $input.all()) {\n  for (const p of (item.json.matches || [])) {\n    if (!p || !p.id) continue;\n    const org = p.organization || {};\n    const title = String(p.title || '');\n    const t = title.toLowerCase();\n    const email = String(p.email || '');\n    const emailStatus = String(p.email_status || '').toLowerCase();\n    const hasVerifiedEmail = Boolean(email) && emailStatus === 'verified';\n    const employees = Number(org.estimated_num_employees || 0);\n    const industry = String(org.industry || '');\n    const website = org.website_url || (org.primary_domain ? 'https://' + org.primary_domain : '');\n\n    // ---- Fixed scoring rules - no AI ----\n    let score = 0;\n    const reasons = [];\n\n    if (/(owner|founder|ceo|managing director|president|chief)/.test(t)) { score += 35; reasons.push('Decision maker'); }\n    else if (/(director|head of|vp|vice president)/.test(t)) { score += 25; reasons.push('Senior leader'); }\n    else if (/manager/.test(t)) { score += 12; reasons.push('Manager'); }\n    else { reasons.push('Junior or unclear title'); }\n\n    if (titlesWanted.some(k => t.includes(k))) { score += 15; reasons.push('Title matches campaign'); }\n\n    if (hasVerifiedEmail) { score += 20; reasons.push('Verified email'); }\n    else { reasons.push('No verified email'); }\n\n    if (employees > 0 && employees >= req.minEmployees && employees <= req.maxEmployees) { score += 15; reasons.push('Company size in range'); }\n    else if (employees > 0) { reasons.push('Company size outside range'); }\n    else { reasons.push('Company size unknown'); }\n\n    if (industryWanted.length && industryWanted.some(k => industry.toLowerCase().includes(k))) { score += 10; reasons.push('Industry match'); }\n\n    if (website) { score += 5; reasons.push('Has website'); }\n\n    if (score > 100) score = 100;\n\n    out.push({ json: {\n      apolloId: String(p.id),\n      campaign: req.campaignName,\n      firstName: p.first_name || '',\n      lastName: p.last_name || '',\n      fullName: p.name || [p.first_name, p.last_name].filter(Boolean).join(' '),\n      title: title,\n      email: email,\n      emailStatus: emailStatus,\n      hasVerifiedEmail: hasVerifiedEmail,\n      linkedinUrl: p.linkedin_url || '',\n      city: p.city || '',\n      country: p.country || '',\n      company: org.name || '',\n      website: website,\n      industry: industry,\n      employees: employees,\n      score: score,\n      reasons: reasons\n    }});\n  }\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "0385f3d5-f025-4169-9348-8c200b0da735",
+      "name": "Fetch Company Website",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "onError": "continueRegularOutput",
+      "position": [
+        2096,
+        336
+      ],
+      "parameters": {
+        "url": "={{ $json.website }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 5,
+              "batchInterval": 500
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 10000
+        }
+      }
+    },
+    {
+      "id": "211f06ee-c90c-4ee7-9c9d-e3d689d503e2",
+      "name": "Prepare Website Text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2304,
+        336
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const lead = $('Flatten & Score Leads').item.json;\nconst raw = typeof $json.data === 'string' ? $json.data : '';\nconst text = raw\n  .replace(/<script[\\s\\S]*?<\\/script>/gi, ' ')\n  .replace(/<style[\\s\\S]*?<\\/style>/gi, ' ')\n  .replace(/<[^>]+>/g, ' ')\n  .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&#39;/g, \"'\").replace(/&quot;/g, '\"')\n  .replace(/\\s+/g, ' ')\n  .trim()\n  .slice(0, 3000);\nreturn { json: Object.assign({}, lead, { websiteText: text, websiteRead: text.length > 200 }) };"
+      }
+    },
+    {
+      "id": "e87d5843-7651-45c1-930d-c2daea8c18f4",
+      "name": "AI Researches & Drafts Email",
+      "type": "@n8n/n8n-nodes-langchain.informationExtractor",
+      "typeVersion": 1.2,
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput",
+      "position": [
+        2704,
+        336
+      ],
+      "parameters": {
+        "text": "=Prospect: {{ $json.fullName }}, {{ $json.title }} at {{ $json.company }}\nFirst name: {{ $json.firstName }}\nIndustry: {{ $json.industry || 'unknown' }} | Employees: {{ $json.employees || 'unknown' }} | Location: {{ [$json.city, $json.country].filter(Boolean).join(', ') || 'unknown' }}\nOur offer: {{ $('Clean Up Request').first().json.offer }}\n\nCompany website text (may be empty):\n{{ $json.websiteText || '(no website text available)' }}",
+        "schemaType": "fromJson",
+        "jsonSchemaExample": "{ \"companySummary\": \"Cebu-based cold-chain logistics firm serving food exporters.\", \"relevantHook\": \"Expanding to a second warehouse in Mandaue\", \"subjectLine\": \"Payroll for your Mandaue expansion\", \"emailBody\": \"Hi Maria, ...\", \"usedWebsite\": true, \"confidence\": 0.82 }",
+        "options": {
+          "systemPromptTemplate": "You research a B2B prospect and draft a short first-contact email. A person reviews every draft before anything is sent.\n\nRULES:\n1. Use ONLY facts from the website text and fields provided. Never invent news, awards, funding, clients, social posts, mutual connections or past conversations.\n2. If the website text is empty or unhelpful, do not claim anything specific about the company beyond its industry. Set usedWebsite to false.\n3. Never state prices, discounts, savings figures, guarantees or results.\n4. emailBody: 70 to 110 words, plain text, start with 'Hi <first name>,'. One specific, grounded observation, one sentence on how the offer could help, one soft ask (a short call or a reply). No signature and no opt-out line - those are added separately.\n5. subjectLine: 7 words or fewer, no clickbait, never start with 'Re:' or 'Fwd:'.\n6. companySummary: one plain sentence describing what the company does.\n7. relevantHook: the single website fact the email is built on, or empty.\n8. confidence: 0 to 1, how well the email is grounded in real facts."
+        }
+      }
+    },
+    {
+      "id": "5ea5dfda-dfa4-40cd-8eab-cadd75f6d1f1",
+      "name": "AI Model - Write Email",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        2704,
+        576
+      ],
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-5.4",
+          "cachedResultName": "gpt-5.4"
+        },
+        "builtInTools": {},
+        "options": {
+          "temperature": 0.3
+        }
+      }
+    },
+    {
+      "id": "b0ae4154-6427-4d11-8392-1593e839a02c",
+      "name": "Set Final Status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3280,
+        336
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const lead = Object.assign({}, $('Prepare Website Text').item.json);\ndelete lead.websiteText;\nconst ai = ($json && $json.output) || {};\nconst reasons = (lead.reasons || []).slice();\n\n// Status is decided by rules. Only strong, emailable prospects reach the review queue.\nlet status = 'pending_review';\nif (!lead.hasVerifiedEmail) { status = 'low_fit'; reasons.push('Held back: no verified email'); }\nelse if (lead.score < 60) { status = 'low_fit'; reasons.push('Score below 60'); }\n\nif (!ai.emailBody) reasons.push('No AI draft - write manually');\nif (ai.usedWebsite === false) reasons.push('Website not used for personalisation');\n\nreturn { json: Object.assign(lead, {\n  reasons: reasons.join(', '),\n  companySummary: ai.companySummary || '',\n  relevantHook: ai.relevantHook || '',\n  subjectLine: ai.subjectLine || '',\n  emailBody: ai.emailBody || '',\n  aiConfidence: Number(ai.confidence || 0),\n  senderName: $('Clean Up Request').first().json.senderName,\n  status: status\n}) };"
+      }
+    },
+    {
+      "id": "72b78dd6-bd07-4341-a643-24d6d892fd15",
+      "name": "Save To Prospects Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "position": [
+        3488,
+        336
+      ],
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "cachedResultName": "Prospecting"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Prospects"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "apolloId"
+          ],
+          "value": {
+            "apolloId": "={{ $json.apolloId }}",
+            "campaign": "={{ $json.campaign }}",
+            "firstName": "={{ $json.firstName }}",
+            "lastName": "={{ $json.lastName }}",
+            "fullName": "={{ $json.fullName }}",
+            "title": "={{ $json.title }}",
+            "email": "={{ $json.email }}",
+            "emailStatus": "={{ $json.emailStatus }}",
+            "linkedinUrl": "={{ $json.linkedinUrl }}",
+            "city": "={{ $json.city }}",
+            "country": "={{ $json.country }}",
+            "company": "={{ $json.company }}",
+            "website": "={{ $json.website }}",
+            "industry": "={{ $json.industry }}",
+            "employees": "={{ $json.employees }}",
+            "score": "={{ $json.score }}",
+            "reasons": "={{ $json.reasons }}",
+            "companySummary": "={{ $json.companySummary }}",
+            "relevantHook": "={{ $json.relevantHook }}",
+            "subjectLine": "={{ $json.subjectLine }}",
+            "emailBody": "={{ $json.emailBody }}",
+            "aiConfidence": "={{ $json.aiConfidence }}",
+            "senderName": "={{ $json.senderName }}",
+            "status": "={{ $json.status }}",
+            "createdAt": "={{ $now.toUTC().toISO() }}"
+          },
+          "schema": [
+            {
+              "id": "apolloId",
+              "displayName": "apolloId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "campaign",
+              "displayName": "campaign",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "firstName",
+              "displayName": "firstName",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "lastName",
+              "displayName": "lastName",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "fullName",
+              "displayName": "fullName",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "title",
+              "displayName": "title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "emailStatus",
+              "displayName": "emailStatus",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "linkedinUrl",
+              "displayName": "linkedinUrl",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "city",
+              "displayName": "city",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "country",
+              "displayName": "country",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "company",
+              "displayName": "company",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "website",
+              "displayName": "website",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "industry",
+              "displayName": "industry",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "employees",
+              "displayName": "employees",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "score",
+              "displayName": "score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "reasons",
+              "displayName": "reasons",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "companySummary",
+              "displayName": "companySummary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "relevantHook",
+              "displayName": "relevantHook",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "subjectLine",
+              "displayName": "subjectLine",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "emailBody",
+              "displayName": "emailBody",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "aiConfidence",
+              "displayName": "aiConfidence",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "senderName",
+              "displayName": "senderName",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "createdAt",
+              "displayName": "createdAt",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
+        "options": {
+          "cellFormat": "RAW"
+        }
+      }
+    },
+    {
+      "id": "6ceabff9-679e-4ef5-9fba-7a2734b733e9",
+      "name": "Build Review Digest",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3696,
+        336
+      ],
+      "parameters": {
+        "jsCode": "const rows = $('Set Final Status').all().map(i => i.json);\nconst review = rows.filter(r => r.status === 'pending_review').sort((x, y) => y.score - x.score);\nconst lines = review.slice(0, 15).map(r => '- *' + r.fullName + '* - ' + r.title + ', ' + r.company + ' (' + r.score + '/100)');\nif (review.length > 15) lines.push('...and ' + (review.length - 15) + ' more in the sheet');\nreturn [{ json: {\n  campaign: $('Clean Up Request').first().json.campaignName,\n  total: rows.length,\n  reviewCount: review.length,\n  lowFitCount: rows.length - review.length,\n  lines: lines.join('\\n') || 'None this time.'\n}}];"
+      }
+    },
+    {
+      "id": "7243effa-dfb5-42c9-a072-268310c4b028",
+      "name": "Slack - Review Digest",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "onError": "continueRegularOutput",
+      "position": [
+        3888,
+        336
+      ],
+      "parameters": {
+        "authentication": "oAuth2",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_SLACK_CHANNEL_ID"
+        },
+        "text": "=:dart: *New prospects ready for review* - {{ $json.campaign }}\n{{ $json.reviewCount }} to review | {{ $json.lowFitCount }} held back (low fit or no verified email)\n\n{{ $json.lines }}\n\nOpen the *Prospecting* Google Sheet > *Prospects* tab. Change *status* to *approved* for anyone worth contacting - they're added to Pipedrive within 15 minutes, with the suggested email pinned to the deal. Set *rejected* or *do_not_contact* to drop someone for good.",
+        "otherOptions": {}
+      }
+    },
+    {
+      "id": "ef89dcaa-9061-4152-abad-5bf1e218ab01",
+      "name": "Every 15 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        1200
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "f220ed45-3d0f-4756-947e-77125f99bce2",
+      "name": "Find Approved Prospects",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "position": [
+        224,
+        1200
+      ],
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "cachedResultName": "Prospecting"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Prospects"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "status",
+              "lookupValue": "approved"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "d0287e79-a6a3-4178-944b-63220aa4cee0",
+      "name": "Slack - Added To CRM",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "executeOnce": true,
+      "onError": "continueRegularOutput",
+      "position": [
+        672,
+        1040
+      ],
+      "parameters": {
+        "authentication": "oAuth2",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_SLACK_CHANNEL_ID"
+        },
+        "text": "=:handshake: *Approved prospects processed: {{ $('Find Approved Prospects').all().length }}* - each valid one now has a Pipedrive deal with the suggested first email pinned as a note. Review and send from Pipedrive.\nRows missing a company or a valid email were set to *needs_fix* in the sheet instead - see the crmNote column.",
+        "otherOptions": {}
+      }
+    },
+    {
+      "id": "0e3f48b3-ca79-4c82-87d0-f6f878b73942",
+      "name": "Find Org In Pipedrive",
+      "type": "n8n-nodes-base.pipedrive",
+      "typeVersion": 2,
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "position": [
+        896,
+        1200
+      ],
+      "parameters": {
+        "resource": "organization",
+        "operation": "search",
+        "term": "={{ $('Loop Over Prospects').item.json.company }}",
+        "exactMatch": true,
+        "limit": 1,
+        "additionalFields": {}
+      }
+    },
+    {
+      "id": "e9aaf620-9cc2-42b9-a063-0a79202eb1c0",
+      "name": "Loop Over Prospects",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        448,
+        1200
+      ],
+      "parameters": {
+        "options": {}
+      }
+    },
+    {
+      "id": "8ae64bb4-0f39-426b-8174-2d328b643967",
+      "name": "Org Exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1120,
+        1200
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ String($json.id ?? '') }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "59a0a262-bbef-401c-8167-7054f5786bd9",
+      "name": "Remember Org ID",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1568,
+        1184
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "r31",
+              "name": "orgId",
+              "value": "={{ $json.id }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "51c16bb3-6032-4ca4-aeba-912564650834",
+      "name": "Create Org In Pipedrive",
+      "type": "n8n-nodes-base.pipedrive",
+      "typeVersion": 2,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "position": [
+        1344,
+        1360
+      ],
+      "parameters": {
+        "resource": "organization",
+        "name": "={{ $('Loop Over Prospects').item.json.company }}",
+        "additionalFields": {}
+      }
+    },
+    {
+      "id": "1f94c383-2337-4987-b870-08b48ff1bd26",
+      "name": "Find Person In Pipedrive",
+      "type": "n8n-nodes-base.pipedrive",
+      "typeVersion": 2,
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "position": [
+        1792,
+        1184
+      ],
+      "parameters": {
+        "resource": "person",
+        "operation": "search",
+        "term": "={{ $('Loop Over Prospects').item.json.email }}",
+        "exactMatch": true,
+        "limit": 1,
+        "additionalFields": {
+          "fields": [
+            "email"
+          ]
+        }
+      }
+    },
+    {
+      "id": "d811981c-06b5-4356-9eca-ea49f78aa670",
+      "name": "Person Exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2032,
+        1184
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ String($json.id ?? '') }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "7db74bd8-6343-463d-92e2-895f723aeae1",
+      "name": "Remember Person ID",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2464,
+        1168
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "r32",
+              "name": "personId",
+              "value": "={{ $json.id }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "cd0183c3-ce4c-4b2e-acc8-d34d9603547d",
+      "name": "Create Person In Pipedrive",
+      "type": "n8n-nodes-base.pipedrive",
+      "typeVersion": 2,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "position": [
+        2240,
+        1360
+      ],
+      "parameters": {
+        "resource": "person",
+        "name": "={{ $('Loop Over Prospects').item.json.fullName }}",
+        "additionalFields": {
+          "emails": {
+            "emailProperties": [
+              {
+                "value": "={{ $('Loop Over Prospects').item.json.email }}"
+              }
+            ]
+          },
+          "org_id": "={{ $('Remember Org ID').item.json.orgId }}"
+        }
+      }
+    },
+    {
+      "id": "8b57c48b-69f9-4905-8043-568452fded59",
+      "name": "Create Deal",
+      "type": "n8n-nodes-base.pipedrive",
+      "typeVersion": 2,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "position": [
+        2688,
+        1168
+      ],
+      "parameters": {
+        "title": "={{ $('Loop Over Prospects').item.json.company }} - {{ $('Loop Over Prospects').item.json.campaign }}",
+        "associateWith": "person",
+        "person_id": "={{ $json.personId }}",
+        "additionalFields": {
+          "org_id": "={{ $('Remember Org ID').item.json.orgId }}"
+        }
+      }
+    },
+    {
+      "id": "c18aa146-8b23-4097-8f77-4f9e80c6d146",
+      "name": "Pin Research & Email To Deal",
+      "type": "n8n-nodes-base.pipedrive",
+      "typeVersion": 2,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "position": [
+        3136,
+        1168
+      ],
+      "parameters": {
+        "resource": "note",
+        "content": "=<b>AI-researched prospect</b> - campaign: {{ $('Loop Over Prospects').item.json.campaign }}<br><b>{{ $('Loop Over Prospects').item.json.fullName }}</b>, {{ $('Loop Over Prospects').item.json.title }}<br>Score: {{ $('Loop Over Prospects').item.json.score }}/100 ({{ $('Loop Over Prospects').item.json.reasons }})<br>Company: {{ $('Loop Over Prospects').item.json.companySummary || 'no summary' }}<br>Hook: {{ $('Loop Over Prospects').item.json.relevantHook || 'none - generic email' }}<br><br><b>Suggested first email</b> (review before sending)<br>Subject: {{ $('Loop Over Prospects').item.json.subjectLine }}<br><br>{{ String($('Loop Over Prospects').item.json.emailBody || '').replace(/\\n/g, '<br>') }}<br><br>{{ $('Loop Over Prospects').item.json.senderName }}<br>Harbourline Payroll Services<br><br>If this isn't relevant, just reply \"no thanks\" and I won't follow up.",
+        "additionalFields": {
+          "deal_id": "={{ $('Create Deal').item.json.id }}",
+          "pinned_to_deal_flag": true
+        }
+      }
+    },
+    {
+      "id": "d3edc6d1-6341-4761-bb42-cad45e6c3083",
+      "name": "Mark As In CRM",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "position": [
+        2912,
+        1168
+      ],
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "cachedResultName": "Prospecting"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Prospects"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "apolloId"
+          ],
+          "value": {
+            "apolloId": "={{ $('Loop Over Prospects').item.json.apolloId }}",
+            "status": "in_crm",
+            "pipedriveDealId": "={{ $('Create Deal').item.json.id }}",
+            "crmAt": "={{ $now.toUTC().toISO() }}"
+          },
+          "schema": [
+            {
+              "id": "apolloId",
+              "displayName": "apolloId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "pipedriveDealId",
+              "displayName": "pipedriveDealId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "crmAt",
+              "displayName": "crmAt",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
+        "options": {
+          "cellFormat": "RAW"
+        }
+      }
+    },
+    {
+      "id": "e0c63687-fd34-45c9-ae1e-881deaa54914",
+      "name": "When Workflow Fails",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        1824
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "12134550-1e26-442c-b8b5-bd96480bf750",
+      "name": "Build Error Summary",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        224,
+        1824
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "r21",
+              "name": "workflowName",
+              "value": "={{ $json.workflow?.name ?? 'Prospecting workflow' }}",
+              "type": "string"
+            },
+            {
+              "id": "r22",
+              "name": "failedNode",
+              "value": "={{ $json.execution?.lastNodeExecuted ?? 'unknown' }}",
+              "type": "string"
+            },
+            {
+              "id": "r23",
+              "name": "errorMessage",
+              "value": "={{ $json.execution?.error?.message ?? 'no message' }}",
+              "type": "string"
+            },
+            {
+              "id": "r24",
+              "name": "executionUrl",
+              "value": "={{ $json.execution?.url ?? '' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "350e516f-59b9-432d-80e4-8ea712c02639",
+      "name": "Slack - Workflow Failed",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "onError": "continueRegularOutput",
+      "position": [
+        448,
+        1824
+      ],
+      "parameters": {
+        "authentication": "oAuth2",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_SLACK_CHANNEL_ID"
+        },
+        "text": "=:rotating_light: *Prospecting workflow failed*\nWorkflow: {{ $json.workflowName }}\nStep that failed: *{{ $json.failedNode }}*\nError: {{ $json.errorMessage }}\n{{ $json.executionUrl }}\n\nNothing is ever emailed automatically, so no prospect was contacted by mistake.\n{{ $json.failedNode === 'Pin Research & Email To Deal' ? 'The deal WAS created and the row is already marked in_crm - only the note is missing. Copy the email from the sheet into a note on that deal. Do not set the row back to approved, or a second deal is created.' : 'If it failed while adding to Pipedrive, the prospect is still marked approved and is retried on the next run. Anyone already in the Google Sheet is skipped on the next run - just submit the form again.' }}",
+        "otherOptions": {}
+      }
+    },
+    {
+      "id": "fefc753f-bc01-4368-affa-659b52453098",
+      "name": "Phase 1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -64,
+        128
+      ],
+      "parameters": {
+        "content": "## 1 · Find new prospects - free\n\nThe sales team fills in the form: job titles, locations, company size, industry and the offer.\n\n**Apollo People Search costs no credits.** Everyone already in the Prospects sheet is skipped - whatever their status - so nobody is enriched or contacted twice.\n\nThe rest are ranked by title (owners and founders first), and only the top *Max to enrich* move on.",
+        "height": 600,
+        "width": 1404,
+        "color": 7
+      }
+    },
+    {
+      "id": "1e8ddbd6-99f2-44a0-bb0d-5f8103a09d7e",
+      "name": "Phase 2",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1360,
+        128
+      ],
+      "parameters": {
+        "content": "## 2 · Enrich - uses credits\n\nApollo Bulk Enrichment returns work email, email status, company size, industry and website - 10 people per call, one call every 1.5 seconds.\n\nPersonal emails and phone numbers are **not** requested.",
+        "height": 600,
+        "width": 450,
+        "color": 4
+      }
+    },
+    {
+      "id": "c82102fc-fc98-41b5-92ce-d28dcb7d5e1b",
+      "name": "Phase 3",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1824,
+        128
+      ],
+      "parameters": {
+        "content": "## 3 · Score by rules, read the website\n\nPoints come from fixed rules, never AI: seniority, title match, verified email, company size, industry, has a website. Every prospect lists the reasons behind its score.\n\nThe company's own website is fetched and cleaned for the next step. A site that's down or blocked doesn't stop the run.",
+        "height": 600,
+        "width": 700,
+        "color": 5
+      }
+    },
+    {
+      "id": "ad28ae7c-c445-4416-ae42-8c6bd03e8b98",
+      "name": "Phase 4",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2528,
+        128
+      ],
+      "parameters": {
+        "content": "## 4 · AI researches & drafts - grounded only\n\nAI writes a one-line company summary and a short first email.\n\nIt may only use facts from the website. No invented news, awards or mutual connections; no prices, savings or guarantees. If the website gave nothing useful, the email stays generic and is flagged.",
+        "height": 600,
+        "width": 640,
+        "color": 6
+      }
+    },
+    {
+      "id": "a78f81ce-f5c2-47e3-8bc2-16e2038a313c",
+      "name": "Phase 5",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        3200,
+        128
+      ],
+      "parameters": {
+        "content": "## 5 · Review queue\n\nEvery prospect is written to the **Prospects** tab of a Google Sheet. Those scoring 60+ with a verified email are **pending_review**; the rest are **low_fit**, so they're never enriched again.\n\nThe client reviews in the sheet - the tool they already know - and changes status to **approved**.\n\nSlack gets one digest per run, not one message per prospect.",
+        "height": 600,
+        "width": 930,
+        "color": 2
+      }
+    },
+    {
+      "id": "2b90eb0c-f5c9-44d4-bceb-e44fa0ab0d3e",
+      "name": "Phase 6",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -64,
+        752
+      ],
+      "parameters": {
+        "content": "## 6 · Approved → Pipedrive\n\nEvery 15 minutes, **approved** rows are added to Pipedrive one at a time:\n- A row with no company or no valid email is set to **needs_fix** (reason in **crmNote**) and skipped - one bad row never blocks the rest\n- Finds the organisation and person first, and creates them only if missing - no duplicates in the CRM\n- Creates a deal, then **immediately** marks the row **in_crm** with the deal ID - so a later failure can never create a second deal\n- Pins a note with the score, the reasons, the company research and the suggested first email\n\nNothing is emailed automatically - the sales rep sends from Pipedrive. If a step before the deal fails, the row stays **approved** and is retried next run.",
+        "height": 832,
+        "width": 3480,
+        "color": 4
+      }
+    },
+    {
+      "id": "18626147-65f3-452e-803c-29ebdcf78d46",
+      "name": "Phase 7",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -64,
+        1600
+      ],
+      "parameters": {
+        "content": "## 7 · If something breaks\n\nThis branch runs whenever a live run fails. It works because the workflow is its own error workflow (**Settings > Error Workflow = this workflow**). If you import or duplicate it, select the copy there again.\n\nManual test runs don't trigger it.\n\nNothing is emailed automatically, so a failure can't contact anyone by mistake.",
+        "height": 448,
+        "width": 1100,
+        "color": 3
+      }
+    },
+    {
+      "id": "561f7ddd-5e5c-4809-8ec5-79563303e575",
+      "name": "Setup",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        4160,
+        128
+      ],
+      "parameters": {
+        "content": "## Sample client: Harbourline Payroll Services (fictional)\n\nOutbound prospecting for an outsourced payroll firm targeting SMEs. Uses Apollo's licensed B2B data - no LinkedIn scraping.\n\n**Setup needed**\n\n**Form login** - the request form is staff-only. Create a Basic Auth credential (user + password for the sales team) and select it in **Prospecting Request Form**.\n\n**Apollo** - create a **master API key** (enrichment needs it). Add a Header Auth credential: name `x-api-key`, value = your key. Select it in both Apollo steps.\n\n**Google Sheets** - the \"Prospecting\" spreadsheet is already created in Google Drive (Project Portfolio > Harbourline) and linked here. Rename its tab to **Prospects** and make sure these columns exist alongside the ones the first run writes: **pipedriveDealId**, **crmAt**, **crmNote**. Add a dropdown on **status**: pending_review, low_fit, approved, rejected, do_not_contact, in_crm, needs_fix. Connect a Google Sheets credential in all five Sheets steps.\n\n**Pipedrive** - connect an API token credential in the six Pipedrive steps.\n\n**Slack / OpenAI** - select your existing credentials.\n\n**Errors** - already wired: Settings > Error Workflow points at this workflow. Re-select it if you import a copy.",
+        "height": 820,
+        "width": 560,
+        "color": 3
+      }
+    },
+    {
+      "id": "6a1f0c3e-6c2b-4d8e-9b7a-2f4e1c9d0a11",
+      "name": "Row Ready For CRM?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        672,
+        1216
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "v1",
+              "leftValue": "={{ String($json.company ?? '').trim().length >= 2 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "v2",
+              "leftValue": "={{ /^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(String($json.email ?? '').trim()) }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "7b2e1d4f-7d3c-4e9f-8c8b-3a5f2d0e1b22",
+      "name": "Flag Row For Fixing",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "position": [
+        896,
+        1360
+      ],
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "cachedResultName": "Prospecting"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Prospects"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "apolloId"
+          ],
+          "value": {
+            "apolloId": "={{ $json.apolloId }}",
+            "status": "needs_fix",
+            "crmNote": "={{ 'Not added to Pipedrive: ' + [String($json.company ?? '').trim().length >= 2 ? '' : 'company is missing', /^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(String($json.email ?? '').trim()) ? '' : 'email is missing or invalid'].filter(Boolean).join(' and ') + '. Fix the row, then set status back to approved.' }}"
+          },
+          "schema": [
+            {
+              "id": "apolloId",
+              "displayName": "apolloId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "crmNote",
+              "displayName": "crmNote",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
+        "options": {
+          "cellFormat": "RAW"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Prospecting Request Form": {
+      "main": [
+        [
+          {
+            "node": "Clean Up Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clean Up Request": {
+      "main": [
+        [
+          {
+            "node": "Apollo - Search People",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apollo - Search People": {
+      "main": [
+        [
+          {
+            "node": "Load Known Prospects",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Known Prospects": {
+      "main": [
+        [
+          {
+            "node": "Shortlist New Prospects",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shortlist New Prospects": {
+      "main": [
+        [
+          {
+            "node": "Anything To Enrich?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anything To Enrich?": {
+      "main": [
+        [
+          {
+            "node": "Apollo - Enrich Contacts",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Slack - No New Prospects",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apollo - Enrich Contacts": {
+      "main": [
+        [
+          {
+            "node": "Flatten & Score Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Flatten & Score Leads": {
+      "main": [
+        [
+          {
+            "node": "Fetch Company Website",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Company Website": {
+      "main": [
+        [
+          {
+            "node": "Prepare Website Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Website Text": {
+      "main": [
+        [
+          {
+            "node": "AI Researches & Drafts Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Researches & Drafts Email": {
+      "main": [
+        [
+          {
+            "node": "Set Final Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Model - Write Email": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Researches & Drafts Email",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Final Status": {
+      "main": [
+        [
+          {
+            "node": "Save To Prospects Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save To Prospects Sheet": {
+      "main": [
+        [
+          {
+            "node": "Build Review Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Review Digest": {
+      "main": [
+        [
+          {
+            "node": "Slack - Review Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every 15 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Find Approved Prospects",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Approved Prospects": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Prospects",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Org In Pipedrive": {
+      "main": [
+        [
+          {
+            "node": "Org Exists?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Prospects": {
+      "main": [
+        [
+          {
+            "node": "Slack - Added To CRM",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Row Ready For CRM?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Org Exists?": {
+      "main": [
+        [
+          {
+            "node": "Remember Org ID",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create Org In Pipedrive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remember Org ID": {
+      "main": [
+        [
+          {
+            "node": "Find Person In Pipedrive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Org In Pipedrive": {
+      "main": [
+        [
+          {
+            "node": "Remember Org ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Person In Pipedrive": {
+      "main": [
+        [
+          {
+            "node": "Person Exists?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Person Exists?": {
+      "main": [
+        [
+          {
+            "node": "Remember Person ID",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create Person In Pipedrive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remember Person ID": {
+      "main": [
+        [
+          {
+            "node": "Create Deal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Person In Pipedrive": {
+      "main": [
+        [
+          {
+            "node": "Remember Person ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Workflow Fails": {
+      "main": [
+        [
+          {
+            "node": "Build Error Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Error Summary": {
+      "main": [
+        [
+          {
+            "node": "Slack - Workflow Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Deal": {
+      "main": [
+        [
+          {
+            "node": "Mark As In CRM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark As In CRM": {
+      "main": [
+        [
+          {
+            "node": "Pin Research & Email To Deal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pin Research & Email To Deal": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Prospects",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Row Ready For CRM?": {
+      "main": [
+        [
+          {
+            "node": "Find Org In Pipedrive",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Flag Row For Fixing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Flag Row For Fixing": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Prospects",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timezone": "Asia/Manila"
+  },
+  "pinData": {}
+}
